@@ -1,0 +1,10 @@
+package: github.com/oliverbestmann/go-websocket-publish
+import:
+- package: github.com/Sirupsen/logrus
+  version: ~0.10.0
+- package: github.com/gorilla/handlers
+  version: ~1.1.0
+- package: github.com/gorilla/mux
+  version: ~1.1.0
+- package: github.com/gorilla/websocket
+  version: ~1.0.0

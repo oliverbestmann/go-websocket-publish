@@ -1,4 +1,4 @@
 /.idea
 *.iml
-/go-websocket-publish
+/go-websocket-publish*
 /vendor
