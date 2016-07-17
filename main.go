@@ -6,52 +6,40 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/oliverbestmann/go-websocket-publish/ws"
 	"io/ioutil"
 	"net/http"
-	"github.com/oliverbestmann/go-websocket-publish/ws"
 )
 
-func main() {
-	router := mux.NewRouter()
+type J map[string]interface{}
 
+func main() {
+	clientSide := mux.NewRouter()
+
+	tokenManager := ws.NewTokenManager()
 	registrar := ws.NewRegistrar()
 
-	router.Path("/streams").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	clientSide.Path("/streams/{stream}/tokens/{token}").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		vars := mux.Vars(req)
+		withStream(w, req, registrar, func(w http.ResponseWriter, req *http.Request, streamId ws.StreamId, hub *ws.Hub) {
+			token := ws.TokenFromString(vars["token"])
+			if ! tokenManager.Allowed(streamId, token) {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+
+			handleClientWebSocket(hub, token, w, req)
+		})
+	})
+
+	serverSide := mux.NewRouter()
+
+	serverSide.Path("/streams").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		streams := registrar.GetStreams()
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(streams)
+		WriteJSON(w, streams)
 	})
 
-	router.Path("/streams/{stream}").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		vars := mux.Vars(req)
-		streamId := vars["stream"]
-
-		hub := registrar.GetExistingHub(streamId)
-		if hub == nil {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-
-		handleClientWebSocket(hub, w, req)
-	})
-
-	router.Path("/streams/{stream}/publish").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		vars := mux.Vars(req)
-		streamId := vars["stream"]
-
-		// TODO check for access rights and stuff
-
-		hub := registrar.GetOrCreateHub(streamId)
-		if hub == nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-
-		handleSenderWebSocket(hub, w, req)
-	})
-
-	router.Path("/streams/{stream}").Methods("DELETE").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	serverSide.Path("/streams/{stream}").Methods("DELETE").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		vars := mux.Vars(req)
 		streamId := vars["stream"]
 
@@ -62,19 +50,67 @@ func main() {
 		}
 	})
 
-	panic(http.ListenAndServe(":8081",
-		handlers.LoggingHandler(logrus.StandardLogger().Writer(),
-			handlers.RecoveryHandler()(router))))
+	serverSide.Path("/streams/{stream}/tokens").Methods("POST").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		withStream(w, req, registrar, func(w http.ResponseWriter, req *http.Request, streamId ws.StreamId, hub *ws.Hub) {
+			token := ws.RandomToken()
+			tokenManager.Allow(streamId, token)
+
+			WriteJSON(w, J{"stream": streamId, "token": token.String()})
+		})
+	})
+
+	serverSide.Path("/streams/{stream}/publish").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		vars := mux.Vars(req)
+		streamId := vars["stream"]
+
+		hub := registrar.GetOrCreateHub(streamId)
+		if hub == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		handleSenderWebSocket(hub, w, req)
+	})
+
+	go func() {
+		logger := logrus.StandardLogger()
+		logrus.Fatal(http.ListenAndServe(":8080",
+			handlers.LoggingHandler(logger.Writer(),
+				handlers.RecoveryHandler()(serverSide))))
+	}()
+
+	logger := logrus.StandardLogger()
+	logrus.Fatal(http.ListenAndServe(":8081",
+		handlers.LoggingHandler(logger.Writer(),
+			handlers.RecoveryHandler()(clientSide))))
 }
 
-func handleClientWebSocket(hub *ws.Hub, writer http.ResponseWriter, request *http.Request) {
+func WriteJSON(w http.ResponseWriter, value interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(value)
+}
+
+type WithStreamHandler func(http.ResponseWriter, *http.Request, ws.StreamId, *ws.Hub)
+
+func withStream(w http.ResponseWriter, req *http.Request, registrar *ws.Registrar, handler WithStreamHandler) {
+	vars := mux.Vars(req)
+	streamId := ws.StreamId(vars["stream"])
+	hub := registrar.GetExistingHub(string(streamId))
+	if hub != nil {
+		handler(w, req, ws.StreamId(streamId), hub)
+	} else {
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+func handleClientWebSocket(hub *ws.Hub, token ws.Token, writer http.ResponseWriter, request *http.Request) {
 	socket, err := websocket.Upgrade(writer, request, nil, 0, 0)
 	if err != nil {
 		logrus.WithError(err).Warn("Could not upgrade websocket")
 		return
 	}
 
-	hub.HandleConnection(socket)
+	hub.HandleConnection(token, socket)
 }
 
 func handleSenderWebSocket(hub *ws.Hub, writer http.ResponseWriter, request *http.Request) {

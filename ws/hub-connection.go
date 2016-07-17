@@ -8,6 +8,7 @@ import (
 type hubConnection struct {
 	socket *websocket.Conn
 	send   chan Message
+	token  Token
 }
 
 func (conn *hubConnection) writeLoop() {

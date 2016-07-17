@@ -1,15 +1,15 @@
 package ws
 
 import (
-	"time"
 	"sync"
+	"time"
 )
 
 type Stream struct {
 	Id      string    `json:"id"`
 	Created time.Time `json:"created"`
 
-	hub     *Hub
+	hub *Hub
 }
 
 type Registrar struct {
@@ -82,4 +82,3 @@ func (r *Registrar) Close(streamId string) bool {
 		return false
 	}
 }
-
