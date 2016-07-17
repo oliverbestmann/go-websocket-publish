@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"github.com/Sirupsen/logrus"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
@@ -8,17 +9,25 @@ import (
 	"io/ioutil"
 	"net/http"
 	"sync"
+	"time"
 )
+
+type Stream struct {
+	Id      string    `json:"id"`
+	Created time.Time `json:"created"`
+
+	hub *Hub
+}
 
 type Registrar struct {
 	lock    sync.RWMutex
-	streams map[string]*Hub
+	streams map[string]*Stream
 }
 
 func NewRegistrar() *Registrar {
 	return &Registrar{
 		lock:    sync.RWMutex{},
-		streams: make(map[string]*Hub),
+		streams: make(map[string]*Stream),
 	}
 }
 
@@ -26,31 +35,54 @@ func (r *Registrar) GetExistingHub(streamId string) *Hub {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 
-	return r.streams[streamId]
+	stream := r.streams[streamId]
+	if stream == nil {
+		return nil
+	}
+
+	return stream.hub
 }
 
 func (r *Registrar) GetOrCreateHub(streamId string) *Hub {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	hub, _ := r.streams[streamId]
-	if hub == nil {
-		hub = NewHub()
-		r.streams[streamId] = hub
+	stream, _ := r.streams[streamId]
+	if stream == nil {
+		stream = &Stream{
+			Id:      streamId,
+			Created: time.Now(),
+			hub:     NewHub(),
+		}
 
-		go hub.MainLoop()
+		r.streams[streamId] = stream
+
+		go stream.hub.MainLoop()
 	}
 
-	return hub
+	return stream.hub
+}
+
+func (r *Registrar) GetStreams() []Stream {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	// get a copy of the streams id.
+	streams := make([]Stream, 0, len(r.streams))
+	for _, stream := range r.streams {
+		streams = append(streams, *stream)
+	}
+
+	return streams
 }
 
 func (r *Registrar) Close(streamId string) bool {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	if hub := r.streams[streamId]; hub != nil {
+	if stream := r.streams[streamId]; stream != nil {
 		delete(r.streams, streamId)
-		hub.RequestShutdown()
+		stream.hub.RequestShutdown()
 		return true
 
 	} else {
@@ -62,6 +94,13 @@ func main() {
 	router := mux.NewRouter()
 
 	registrar := NewRegistrar()
+
+	router.Path("/streams").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		streams := registrar.GetStreams()
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(streams)
+	})
 
 	router.Path("/streams/{stream}").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		vars := mux.Vars(req)
