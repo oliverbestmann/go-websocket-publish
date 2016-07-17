@@ -3,8 +3,11 @@ set -e
 
 glide install
 
-# build nativley
-go build -a
+# build for linux
+GOOS=linux CGO_ENABLED=0 go build -a
 
 # build for windows
-GOOS=windows GOARCH=386 go build -o go-websocket-publish.exe
+# GOOS=windows GOARCH=386 go build -o go-websocket-publish.exe
+
+docker build -t oliverbestmann/go-websocket-publish .
+docker push oliverbestmann/go-websocket-publish
