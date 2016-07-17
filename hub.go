@@ -92,6 +92,10 @@ func (h *Hub) HandleConnection(socket *websocket.Conn) {
 	conn.readLoop()
 }
 
+func (h *Hub) Shutdown() {
+	// TODO
+}
+
 func (h *Hub) Broadcast(msgType int, payload []byte) {
 	h.broadcast <- Message{msgType, payload}
 }

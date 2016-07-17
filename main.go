@@ -7,19 +7,83 @@ import (
 	"github.com/gorilla/websocket"
 	"io/ioutil"
 	"net/http"
+	"sync"
 )
+
+type Registrar struct {
+	lock    sync.RWMutex
+	streams map[string]*Hub
+}
+
+func NewRegistrar() *Registrar {
+	return &Registrar{
+		lock: sync.RWMutex{},
+		streams: make(map[string]*Hub),
+	}
+}
+
+func (r *Registrar) GetExistingHub(streamId string) *Hub {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+
+	return r.streams[streamId]
+}
+
+func (r *Registrar) GetOrCreateHub(streamId string) *Hub {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	hub, _ := r.streams[streamId]
+	if hub == nil {
+		hub = NewHub()
+		r.streams[streamId] = hub
+
+		go hub.MainLoop()
+	}
+
+	return hub
+}
+
+func (r *Registrar) Close(streamId string) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	if hub := r.streams[streamId]; hub != nil {
+		delete(r.streams, streamId)
+		go hub.Shutdown()
+	}
+}
 
 func main() {
 	router := mux.NewRouter()
 
-	hub := NewHub()
-	go hub.MainLoop()
+	registrar := NewRegistrar()
 
-	router.Path("/subscribe").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	router.Path("/subscribe/{stream}").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		vars := mux.Vars(req)
+		streamId := vars["stream"]
+
+		hub := registrar.GetExistingHub(streamId)
+		if hub == nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
 		handleClientWebSocket(hub, w, req)
 	})
 
-	router.Path("/publish").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	router.Path("/publish/{stream}").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		vars := mux.Vars(req)
+		streamId := vars["stream"]
+
+		// TODO check for access rights and stuff
+
+		hub := registrar.GetOrCreateHub(streamId)
+		if hub == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
 		handleSenderWebSocket(hub, w, req)
 	})
 
