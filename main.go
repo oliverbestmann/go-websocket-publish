@@ -17,7 +17,7 @@ type Registrar struct {
 
 func NewRegistrar() *Registrar {
 	return &Registrar{
-		lock: sync.RWMutex{},
+		lock:    sync.RWMutex{},
 		streams: make(map[string]*Hub),
 	}
 }
@@ -44,13 +44,17 @@ func (r *Registrar) GetOrCreateHub(streamId string) *Hub {
 	return hub
 }
 
-func (r *Registrar) Close(streamId string) {
+func (r *Registrar) Close(streamId string) bool {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
 	if hub := r.streams[streamId]; hub != nil {
 		delete(r.streams, streamId)
-		go hub.Shutdown()
+		hub.RequestShutdown()
+		return true
+
+	} else {
+		return false
 	}
 }
 
@@ -59,7 +63,7 @@ func main() {
 
 	registrar := NewRegistrar()
 
-	router.Path("/subscribe/{stream}").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	router.Path("/streams/{stream}").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		vars := mux.Vars(req)
 		streamId := vars["stream"]
 
@@ -72,7 +76,7 @@ func main() {
 		handleClientWebSocket(hub, w, req)
 	})
 
-	router.Path("/publish/{stream}").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	router.Path("/streams/{stream}/publish").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		vars := mux.Vars(req)
 		streamId := vars["stream"]
 
@@ -85,6 +89,15 @@ func main() {
 		}
 
 		handleSenderWebSocket(hub, w, req)
+	})
+
+	router.Path("/streams/{stream}").Methods("DELETE").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		vars := mux.Vars(req)
+		streamId := vars["stream"]
+
+		if !registrar.Close(streamId) {
+			w.WriteHeader(http.StatusNotFound)
+		}
 	})
 
 	panic(http.ListenAndServe(":8081",
@@ -115,7 +128,7 @@ func handleSenderWebSocket(hub *Hub, writer http.ResponseWriter, request *http.R
 			socket.Close()
 			break
 
-		} else {
+		} else if msgType != websocket.CloseMessage {
 			payload, err := ioutil.ReadAll(msgContent)
 			if err != nil {
 				logrus.WithError(err).Warn("Could not read a complete data frame from sender.")

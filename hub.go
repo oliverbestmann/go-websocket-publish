@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"github.com/gorilla/websocket"
 )
 
@@ -33,6 +32,8 @@ type Hub struct {
 	unregister chan *hubConnection
 }
 
+type none struct{}
+
 func NewHub() *Hub {
 	return &Hub{
 		broadcast:   make(chan Message, 16),
@@ -47,6 +48,7 @@ func NewHub() *Hub {
  * call it in a go-routine.
  */
 func (h *Hub) MainLoop() {
+loop:
 	for {
 		select {
 		case conn := <-h.register:
@@ -57,8 +59,11 @@ func (h *Hub) MainLoop() {
 			close(conn.send)
 
 		case message := <-h.broadcast:
-			for conn := range h.connections {
+			if message.Type == websocket.CloseMessage {
+				break loop
+			}
 
+			for conn := range h.connections {
 				// send the message without blocking.
 				// close the connection, if send queue is full.
 				select {
@@ -69,6 +74,12 @@ func (h *Hub) MainLoop() {
 				}
 			}
 		}
+	}
+
+	// close all sockets
+	for conn := range h.connections {
+		delete(h.connections, conn)
+		close(conn.send)
 	}
 }
 
@@ -92,19 +103,10 @@ func (h *Hub) HandleConnection(socket *websocket.Conn) {
 	conn.readLoop()
 }
 
-func (h *Hub) Shutdown() {
-	// TODO
+func (h *Hub) RequestShutdown() {
+	h.Broadcast(websocket.CloseMessage, []byte{})
 }
 
 func (h *Hub) Broadcast(msgType int, payload []byte) {
 	h.broadcast <- Message{msgType, payload}
-}
-
-func (h *Hub) BroadcastObject(message interface{}) error {
-	bytes, err := json.Marshal(message)
-	if err == nil {
-		h.Broadcast(websocket.BinaryMessage, bytes)
-	}
-
-	return err
 }
