@@ -35,3 +35,21 @@ func (conn *hubConnection) readLoop() {
 		}
 	}
 }
+
+/**
+ * Drains the send queue. This will just remove all pending messages from the send
+ * queue - this will not interrupt a currently active send.
+ */
+func (conn *hubConnection) drainQueue() {
+	for {
+		select {
+		case _, ok := <-conn.send:
+			if ! ok {
+				return
+			}
+
+		default:
+			return
+		}
+	}
+}

@@ -84,8 +84,9 @@ func (h *Hub) MainLoop() {
 				select {
 				case conn.send <- message:
 				default:
-					delete(h.connections, conn)
-					close(conn.send)
+					// couldnt write to the buffer. looks like the client has
+					// problems receiving the messages. we'll just empty the queue.
+					conn.drainQueue()
 				}
 			}
 		}
@@ -96,6 +97,10 @@ func (h *Hub) MainLoop() {
 		delete(h.connections, conn)
 		close(conn.send)
 	}
+}
+
+func (h *Hub) unregisterConnection(conn *hubConnection) {
+	h.unregister <- conn
 }
 
 /**
@@ -112,6 +117,7 @@ func (h *Hub) HandleConnection(token Token, socket *websocket.Conn) {
 
 	// register this connection with the hub
 	h.register <- conn
+	defer h.unregisterConnection(conn)
 
 	// forward writes and consume the read end too.
 	go conn.writeLoop()
