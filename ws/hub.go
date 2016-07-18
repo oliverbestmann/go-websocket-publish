@@ -81,14 +81,15 @@ func (h *Hub) MainLoop() {
 			}
 
 			for conn := range h.connections {
-				// send the message without blocking.
-				// close the connection, if send queue is full.
+				// put the message on the send-queue for this connection
 				select {
 				case conn.send <- message:
 				default:
-					// couldnt write to the buffer. looks like the client has
+					// couldn't write to the queue. looks like the client has
 					// problems receiving the messages. we'll just empty the queue.
+				  // and add the message back again
 					conn.drainQueue()
+					conn.send <- message
 				}
 			}
 		}

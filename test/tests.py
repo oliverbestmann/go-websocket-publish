@@ -1,41 +1,8 @@
-import hashlib
-import uuid
+from contextlib import closing
 
 import pytest
-import requests
-import websocket
-from attrdict import AttrDict
 
-
-def random_stream():
-    return hashlib.md5(str(uuid.uuid4())).hexdigest()
-
-
-def path_stream(stream, token=None, suffix=None):
-    url = "/streams/" + stream
-    if token:
-        url += "/tokens/" + token
-    if suffix:
-        url += suffix
-    return url
-
-
-def server_api(method, path):
-    url = "http://localhost:8080" + path
-    response = requests.request(method, url)
-    response.raise_for_status()
-    if response.status_code == 204 or len(response.content) == 0:
-        return {}
-    else:
-        return AttrDict(response.json())
-
-
-def client_ws(path):
-    return websocket.create_connection("ws://localhost:8081" + path, timeout=1)
-
-
-def server_ws(path):
-    return websocket.create_connection("ws://localhost:8080" + path, timeout=1)
+from helpers import *
 
 
 def test_404_if_stream_does_not_exists():
@@ -128,3 +95,26 @@ def test_close_client_stream_if_token_rejected():
 
     with pytest.raises(websocket.WebSocketConnectionClosedException):
         client.recv()
+
+
+def test_server_does_not_buffer_too_much_if_client_lags():
+    stream = random_stream()
+    with closing(server_ws(path_stream(stream, suffix="/publish"))) as server:
+        token = server_api("POST", path_stream(stream, suffix="/tokens")).token
+        with closing(client_ws(path_stream(stream, token))) as client:
+            N = 1024
+
+            # send 10k messages
+            for idx in range(1, N):
+                server.send("x")
+
+            server.send("last message")
+
+            # check how many messages we get back
+            count = 0
+            while True:
+                count += 1
+                if client.recv() == "last message":
+                    break
+
+            assert count < N
