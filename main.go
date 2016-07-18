@@ -63,7 +63,9 @@ func main() {
 		vars := mux.Vars(req)
 		withStream(w, req, registrar, func(streamId ws.StreamId, hub *ws.Hub) {
 			token := ws.TokenFromString(vars["token"])
+
 			tokenManager.Revoke(streamId, token)
+			hub.RevokeToken(token)
 		})
 	})
 

@@ -70,8 +70,10 @@ func (h *Hub) MainLoop() {
 			}
 
 		case conn := <-h.unregister:
-			delete(h.connections, conn)
-			close(conn.send)
+			if _, ok := h.connections[conn]; ok {
+				delete(h.connections, conn)
+				close(conn.send)
+			}
 
 		case message := <-h.broadcast:
 			if message.Type == websocket.CloseMessage {
@@ -124,7 +126,7 @@ func (h *Hub) HandleConnection(token Token, socket *websocket.Conn) {
 	conn.readLoop()
 }
 
-func (h *Hub) InvalidateToken(token Token) {
+func (h *Hub) RevokeToken(token Token) {
 	h.unregisterToken <- token
 }
 

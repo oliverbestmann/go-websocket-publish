@@ -86,3 +86,45 @@ def test_okay_if_stream_exists_and_token_rejected():
         client_ws(path_stream(stream, token))
 
     assert err.value.status_code == 401
+
+
+def test_receive_message_from_stream():
+    stream = random_stream()
+    server = server_ws(path_stream(stream, suffix="/publish"))
+    token = server_api("POST", path_stream(stream, suffix="/tokens")).token
+    client = client_ws(path_stream(stream, token))
+
+    server.send("payload of the message")
+    assert client.recv() == "payload of the message"
+
+    server.send("a second message")
+    assert client.recv() == "a second message"
+
+
+def test_receive_message_from_stream_if_server_reconnects():
+    stream = random_stream()
+    server = server_ws(path_stream(stream, suffix="/publish"))
+    token = server_api("POST", path_stream(stream, suffix="/tokens")).token
+    client = client_ws(path_stream(stream, token))
+
+    server.send("payload of the message")
+    assert client.recv() == "payload of the message"
+
+    # reconnect
+    server.close()
+    server = server_ws(path_stream(stream, suffix="/publish"))
+
+    server.send("a second message")
+    assert client.recv() == "a second message"
+
+
+def test_close_client_stream_if_token_rejected():
+    stream = random_stream()
+    server = server_ws(path_stream(stream, suffix="/publish"))
+    token = server_api("POST", path_stream(stream, suffix="/tokens")).token
+    client = client_ws(path_stream(stream, token))
+
+    server_api("DELETE", path_stream(stream, token))
+
+    with pytest.raises(websocket.WebSocketConnectionClosedException):
+        client.recv()
