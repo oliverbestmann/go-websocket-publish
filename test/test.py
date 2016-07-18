@@ -120,7 +120,7 @@ def test_receive_message_from_stream_if_server_reconnects():
 
 def test_close_client_stream_if_token_rejected():
     stream = random_stream()
-    server = server_ws(path_stream(stream, suffix="/publish"))
+    server_ws(path_stream(stream, suffix="/publish")).close()
     token = server_api("POST", path_stream(stream, suffix="/tokens")).token
     client = client_ws(path_stream(stream, token))
 
