@@ -21,7 +21,7 @@ func main() {
 
 	clientSide.Path("/streams/{stream}/tokens/{token}").Methods("GET").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		vars := mux.Vars(req)
-		withStream(w, req, registrar, func(w http.ResponseWriter, req *http.Request, streamId ws.StreamId, hub *ws.Hub) {
+		withStream(w, req, registrar, func(streamId ws.StreamId, hub *ws.Hub) {
 			token := ws.TokenFromString(vars["token"])
 			if ! tokenManager.Allowed(streamId, token) {
 				w.WriteHeader(http.StatusUnauthorized)
@@ -51,11 +51,19 @@ func main() {
 	})
 
 	serverSide.Path("/streams/{stream}/tokens").Methods("POST").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		withStream(w, req, registrar, func(w http.ResponseWriter, req *http.Request, streamId ws.StreamId, hub *ws.Hub) {
+		withStream(w, req, registrar, func(streamId ws.StreamId, hub *ws.Hub) {
 			token := ws.RandomToken()
 			tokenManager.Allow(streamId, token)
 
 			WriteJSON(w, J{"stream": streamId, "token": token.String()})
+		})
+	})
+
+	serverSide.Path("/streams/{stream}/tokens/{token}").Methods("DELETE").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		vars := mux.Vars(req)
+		withStream(w, req, registrar, func(streamId ws.StreamId, hub *ws.Hub) {
+			token := ws.TokenFromString(vars["token"])
+			tokenManager.Revoke(streamId, token)
 		})
 	})
 
@@ -90,14 +98,14 @@ func WriteJSON(w http.ResponseWriter, value interface{}) {
 	json.NewEncoder(w).Encode(value)
 }
 
-type WithStreamHandler func(http.ResponseWriter, *http.Request, ws.StreamId, *ws.Hub)
+type WithStreamHandler func(ws.StreamId, *ws.Hub)
 
 func withStream(w http.ResponseWriter, req *http.Request, registrar *ws.Registrar, handler WithStreamHandler) {
 	vars := mux.Vars(req)
 	streamId := ws.StreamId(vars["stream"])
 	hub := registrar.GetExistingHub(string(streamId))
 	if hub != nil {
-		handler(w, req, ws.StreamId(streamId), hub)
+		handler(ws.StreamId(streamId), hub)
 	} else {
 		w.WriteHeader(http.StatusNotFound)
 	}

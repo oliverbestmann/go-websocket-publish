@@ -31,12 +31,14 @@ func (tm *TokenManager) Allow(stream StreamId, token Token) {
 	tm.tokens[token] = stream
 }
 
-func (tm *TokenManager) Invalidate(stream StreamId, token Token) {
+func (tm *TokenManager) Revoke(stream StreamId, token Token) {
 	tm.lock.Lock()
 	defer tm.lock.Unlock()
 
-	// remove the token!
-	delete(tm.tokens, token)
+	if tm.tokens[token] == stream {
+		// remove the token!
+		delete(tm.tokens, token)
+	}
 }
 
 func (tm *TokenManager) RemoveStream(streamToRemove StreamId) []Token {
